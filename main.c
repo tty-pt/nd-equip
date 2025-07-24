@@ -1,4 +1,5 @@
 #include <nd/nd.h>
+#include <nd/fight.h>
 #include "./include/uapi/equip.h"
 #include <stdlib.h>
 
@@ -7,19 +8,17 @@
 #define WTS_WEAPON(equ) phys_wts[EQT(equ->eqw)]
 #define BODYPART_ID(_c) ch_bodypart_map[(int) _c]
 
-unsigned type_equipment, bcp_equipment;
+#define RARE_MAX 6
 
-enum bodypart {
-	BP_NULL,
-	BP_HEAD,
-	BP_NECK,
-	BP_CHEST,
-	BP_BACK,
-	BP_WEAPON,
-	BP_LFINGER,
-	BP_RFINGER,
-	BP_LEGS,
-};
+#define MSRA(ms, ra, G) G(ms) * (ra + 1) / RARE_MAX
+#define IE(equ, G) MSRA(equ->msv, equ->rare, G)
+
+#define DODGE_ARMOR(def) def / 4
+#define DEF_ARMOR(equ, aux) (IE(equ, DEF_G) >> aux)
+#define DMG_WEAPON(equ) IE(equ, DMG_G)
+
+unsigned type_equipment, bcp_equipment, equipper_hd;
+unsigned fighter_hd;
 
 enum bodypart ch_bodypart_map[] = {
 	[0 ... 254] = 0,
@@ -27,7 +26,7 @@ enum bodypart ch_bodypart_map[] = {
 	['n'] = BP_NECK,
 	['c'] = BP_CHEST,
 	['b'] = BP_BACK,
-	['w'] = BP_WEAPON,
+	['w'] = BP_RHAND,
 	['l'] = BP_LFINGER,
 	['r'] = BP_RFINGER,
 	['g'] = BP_LEGS,
@@ -47,49 +46,33 @@ static const char *rarity_str[] = {
 void
 mcp_equipment(unsigned player_ref)
 {
-	ENT eplayer = ent_get(player_ref);
+	equipper_t equipper;
 	unsigned aux;
 
-	fbcp(player_ref, sizeof(eplayer.equipment), bcp_equipment, eplayer.equipment);
+	nd_get(equipper_hd, equipper, &player_ref);
+
+	fbcp(player_ref, sizeof(equipper), bcp_equipment, equipper);
 	
-	aux = eplayer.equipment[ES_HEAD];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_NECK];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_CHEST];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_BACK];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_RHAND];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_LFINGER];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_RFINGER];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
-	aux = eplayer.equipment[ES_PANTS];
-	if (aux && aux != NOTHING)
-		fbcp_item(player_ref, aux, 0);
+	for (unsigned slot = 0; slot < BP_MAX; slot++) {
+		register unsigned ref;
+		ref = equipper[slot];
+		if (ref && ref != NOTHING)
+			fbcp_item(player_ref, ref, 0);
+	}
 }
 
-int on_examine(unsigned player_ref, unsigned thing_ref) {
-	OBJ thing;
-	nd_get(HD_OBJ, &thing, &thing_ref);
-	if (thing.type != type_equipment)
+int on_examine(unsigned player_ref, unsigned ref, unsigned type) {
+	OBJ obj;
+	EQU *equ = (EQU *) &obj.sp.raw;
+	if (type != type_equipment)
 		return 1;
-	EQU *ething = (EQU *) &thing.sp.raw;
-	nd_writef(player_ref, "equipment eqw %u msv %u.\n", ething->eqw, ething->msv);
+	nd_get(HD_OBJ, &obj, &ref);
+	nd_writef(player_ref, "Equip: eqw %u msv %u.\n", equ->eqw, equ->msv);
 	return 0;
 }
 
 int
-equip_affect(ENT *ewho, EQU *equ)
+equip_affect(fighter_t *fighter, EQU *equ)
 {
 	register unsigned msv = equ->msv,
 		 eqw = equ->eqw,
@@ -99,39 +82,39 @@ equip_affect(ENT *ewho, EQU *equ)
 	unsigned aux = 0;
 
 	switch (eql) {
-	case ES_RHAND:
-		if (ewho->attr[ATTR_STR] < msv)
+	case BP_RHAND:
+		if (fighter->attr[ATTR_STR] < msv)
 			return 1;
-		EFFECT(ewho, DMG).value += DMG_WEAPON(equ);
-		/* ewho->wts = WTS_WEAPON(equ); */
+		EFFECT(fighter, DMG).value += DMG_WEAPON(equ);
+		fighter->wtst = EQT(equ->eqw);
 		break;
 
-	case ES_HEAD:
-	case ES_PANTS:
+	case BP_HEAD:
+	case BP_LEGS:
 		aux = 1;
-	case ES_CHEST:
+	case BP_CHEST:
 
 		switch (eqt) {
 		case ARMOR_LIGHT:
-			if (ewho->attr[ATTR_DEX] < msv)
+			if (fighter->attr[ATTR_DEX] < msv)
 				return 1;
 			aux += 2;
 			break;
 		case ARMOR_MEDIUM:
 			msv /= 2;
-			if (ewho->attr[ATTR_STR] < msv
-			    || ewho->attr[ATTR_DEX] < msv)
+			if (fighter->attr[ATTR_STR] < msv
+			    || fighter->attr[ATTR_DEX] < msv)
 				return 1;
 			aux += 1;
 			break;
 		case ARMOR_HEAVY:
-			if (ewho->attr[ATTR_STR] < msv)
+			if (fighter->attr[ATTR_STR] < msv)
 				return 1;
 		}
 		aux = DEF_ARMOR(equ, aux);
-		EFFECT(ewho, DEF).value += aux;
-		int pd = EFFECT(ewho, DODGE).value - DODGE_ARMOR(aux);
-		EFFECT(ewho, DODGE).value = pd > 0 ? pd : 0;
+		EFFECT(fighter, DEF).value += aux;
+		int pd = EFFECT(fighter, DODGE).value - DODGE_ARMOR(aux);
+		EFFECT(fighter, DODGE).value = pd > 0 ? pd : 0;
 	}
 
 	return 0;
@@ -140,33 +123,42 @@ equip_affect(ENT *ewho, EQU *equ)
 int
 equip(unsigned who_ref, unsigned eq_ref)
 {
+	fighter_t fighter;
+	equipper_t equipper;
 	OBJ eq;
 	nd_get(HD_OBJ, &eq, &eq_ref);
-	ENT ewho = ent_get(who_ref);
+	nd_get(equipper_hd, equipper, &who_ref);
+	nd_get(fighter_hd, &fighter, &who_ref);
 	EQU *eeq = (EQU *) &eq.sp.raw;
 	unsigned eql = EQL(eeq->eqw);
 
-	if (!eql || EQUIP(&ewho, eql) > 0
-	    || equip_affect(&ewho, eeq))
+	if (!eql || equipper[eql] > 0
+	    || equip_affect(&fighter, eeq))
 		return 1;
 
-	EQUIP(&ewho, eql) = eq_ref;
+	equipper[eql] = eq_ref;
 	eeq->flags |= EQF_EQUIPPED;
 
 	nd_writef(who_ref, "You equip %s.\n", eq.name);
-	ent_set(who_ref, &ewho);
-	mcp_stats(who_ref);
+	nd_put(equipper_hd, &who_ref, equipper);
 	mcp_content_out(who_ref, eq_ref);
 	mcp_equipment(who_ref);
+	SIC_CALL(NULL, on_equip, who_ref);
 	return 0;
 }
 
 unsigned
 unequip(unsigned player_ref, unsigned eql)
 {
+	fighter_t fighter;
 	ENT eplayer = ent_get(player_ref);
-	unsigned eq_ref = EQUIP(&eplayer, eql);
+	equipper_t equipper;
+	unsigned eq_ref;
 	unsigned eqt, aux;
+
+	nd_get(fighter_hd, &fighter, &player_ref);
+	nd_get(equipper_hd, equipper, &player_ref);
+	eq_ref = equipper[eql];
 
 	if (eq_ref == NOTHING)
 		return NOTHING;
@@ -178,36 +170,42 @@ unequip(unsigned player_ref, unsigned eql)
 	aux = 0;
 
 	switch (eql) {
-	case ES_RHAND:
-		EFFECT(&eplayer, DMG).value -= DMG_WEAPON(eeq);
+	case BP_RHAND:
+		EFFECT(&fighter, DMG).value -= DMG_WEAPON(eeq);
 		break;
-	case ES_PANTS:
-	case ES_HEAD:
+	case BP_LEGS:
+	case BP_HEAD:
 		aux = 1;
-	case ES_CHEST:
+	case BP_CHEST:
 		switch (eqt) {
 		case ARMOR_LIGHT: aux += 2; break;
 		case ARMOR_MEDIUM: aux += 1; break;
 		}
 		aux = DEF_ARMOR(eeq, aux);
-		EFFECT(&eplayer, DEF).value -= aux;
-		EFFECT(&eplayer, DODGE).value += DODGE_ARMOR(aux);
+		EFFECT(&fighter, DEF).value -= aux;
+		EFFECT(&fighter, DODGE).value += DODGE_ARMOR(aux);
 	}
 
-	EQUIP(&eplayer, eql) = NOTHING;
+	equipper[eql] = NOTHING;
 	eeq->flags &= ~EQF_EQUIPPED;
-	ent_set(player_ref, &eplayer);
+	nd_put(equipper_hd, &player_ref, equipper);
+	nd_put(fighter_hd, &player_ref, &fighter);
 	mcp_content_in(player_ref, eq_ref);
-	mcp_stats(player_ref);
 	mcp_equipment(player_ref);
+	SIC_CALL(NULL, on_unequip, player_ref);
 	return eq_ref;
 }
 
-ENT on_birth(unsigned ent_ref, ENT eplayer) {
+int on_birth(unsigned ent_ref, uint64_t v) {
+	fighter_t fighter;
+	equipper_t equipper;
 	int i;
 
-	for (i = 0; i < ES_MAX; i++) {
-		unsigned eq = EQUIP(&eplayer, i);
+	nd_get(equipper_hd, equipper, &ent_ref);
+	nd_get(fighter_hd, &fighter, &ent_ref);
+
+	for (i = 0; i < BP_MAX; i++) {
+		unsigned eq = equipper[i];
 
 		if (eq <= 0)
 			continue;
@@ -215,10 +213,11 @@ ENT on_birth(unsigned ent_ref, ENT eplayer) {
 		OBJ oeq;
 		nd_get(HD_OBJ, &oeq, &eq);
 		EQU *eeq = (EQU *) &oeq.sp.raw;
-		equip_affect(&eplayer, eeq);
+		equip_affect(&fighter, eeq);
 	}
 
-	return eplayer;
+	nd_put(fighter_hd, &ent_ref, &fighter);
+	return 0;
 }
 
 static inline int
@@ -237,17 +236,17 @@ rarity_get(void) {
 	return 5; // MYTHICAL
 }
 
-int on_add(unsigned ref, uint64_t v)
+int on_add(unsigned ref, unsigned type, uint64_t v)
 {
 	OBJ obj;
 	SKEL skel;
 	SEQU *sequ;
 	EQU *enu;
 
-	nd_get(HD_OBJ, &obj, &ref);
-	if (obj.type != type_equipment)
+	if (type != type_equipment)
 		return 1;
 
+	nd_get(HD_OBJ, &obj, &ref);
 	nd_get(HD_SKEL, &skel, &obj.skid);
 	sequ = (SEQU *) &skel.sp.raw;
 	enu = (EQU *) &obj.sp.raw;
@@ -316,25 +315,19 @@ do_unequip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__(
 	}
 }
 
-ENT on_attack(unsigned player_ref, ENT eplayer) {
-	unsigned eq_ref = EQUIP(&eplayer, ES_RHAND);
-
-	if (eq_ref) {
-		OBJ eq;
-		nd_get(HD_OBJ, &eq, &eq_ref);
-		EQU *equ = (EQU *) eq.sp.raw;
-		eplayer.wtst = EQT(equ->eqw);
-	}
-
-	return eplayer;
-}
-
 void mod_open(void *arg __attribute__((unused))) {
 	type_equipment = nd_put(HD_TYPE, NULL, "equipment");
 	bcp_equipment = nd_put(HD_BCP, NULL, "equipment");
+
 	nd_register("equip", do_equip, 0);
 	nd_register("unequip", do_unequip, 0);
+
 	action_register("equip", "👕");
+
+	nd_len_reg("equipper", sizeof(equipper_t));
+	equipper_hd = nd_open("equipper", "u", "equipper", ND_AINDEX);
+
+	nd_get(HD_HD, &fighter_hd, "fighter");
 }
 
 void mod_install(void *arg) {
