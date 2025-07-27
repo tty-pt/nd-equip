@@ -1,7 +1,9 @@
 #include <nd/nd.h>
+#include <nd/attr.h>
 #include <nd/fight.h>
 #include "./include/uapi/equip.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 #define EQT(x)		(x>>6)
 #define EQL(x)		(x & 15)
@@ -71,50 +73,94 @@ int on_examine(unsigned player_ref, unsigned ref, unsigned type) {
 	return 0;
 }
 
+short effect(unsigned ref, enum affect af, short prev) {
+	equipper_t equipper;
+	unsigned aux, eqt, eql;
+	OBJ obj;
+	EQU *equ = (EQU *) &obj.data;
+
+	switch (af) {
+		case AF_DMG:
+			nd_get(equipper_hd, equipper, &ref);
+			nd_get(HD_OBJ, &obj, &equipper[BP_RHAND]);
+			return prev + DMG_WEAPON(equ);
+		case AF_DEF:
+		case AF_DODGE:
+			break;
+		default:
+		       return prev;
+	}
+
+	nd_get(equipper_hd, equipper, &ref);
+	aux = equipper[BP_LEGS];
+	nd_get(HD_OBJ, &obj, &aux);
+	equ = (EQU *) &obj.data;
+	eqt = EQT(equ->eqw);
+	eql = EQL(equ->eqw);
+
+	switch (eql) {
+		case BP_HEAD:
+			aux = 1;
+			break;
+		case BP_LEGS:
+			aux = 2;
+			break;
+		case BP_CHEST:
+			aux = 3;
+			break;
+	}
+
+	switch (eqt) {
+		case ARMOR_MEDIUM:
+			aux *= 2;
+			break;
+		case ARMOR_HEAVY:
+			aux *= 3;
+	}
+
+	aux = DEF_ARMOR(equ, aux);
+
+	if (af == AF_DEF)
+		return prev + aux;
+
+	int pd = prev - DODGE_ARMOR(aux);
+	return pd > 0 ? pd : 0;
+}
+
 int
-equip_affect(fighter_t *fighter, EQU *equ)
+equip_affect(unsigned ref, fighter_t *fighter, EQU *equ)
 {
 	register unsigned msv = equ->msv,
 		 eqw = equ->eqw,
 		 eql = EQL(eqw),
 		 eqt = EQT(eqw);
 
-	unsigned aux = 0;
-
 	switch (eql) {
 	case BP_RHAND:
-		if (fighter->attr[ATTR_STR] < msv)
+		if (call_stat(ref, ATTR_STR) < msv)
 			return 1;
-		EFFECT(fighter, DMG).value += DMG_WEAPON(equ);
 		fighter->wtst = EQT(equ->eqw);
 		break;
 
 	case BP_HEAD:
 	case BP_LEGS:
-		aux = 1;
 	case BP_CHEST:
 
 		switch (eqt) {
 		case ARMOR_LIGHT:
-			if (fighter->attr[ATTR_DEX] < msv)
+			if (call_stat(ref, ATTR_DEX) < msv)
 				return 1;
-			aux += 2;
 			break;
 		case ARMOR_MEDIUM:
 			msv /= 2;
-			if (fighter->attr[ATTR_STR] < msv
-			    || fighter->attr[ATTR_DEX] < msv)
+			if (call_stat(ref, ATTR_STR) < msv
+				|| call_stat(ref, ATTR_DEX) < msv)
 				return 1;
-			aux += 1;
 			break;
 		case ARMOR_HEAVY:
-			if (fighter->attr[ATTR_STR] < msv)
+			if (call_stat(ref, ATTR_STR) < msv)
 				return 1;
 		}
-		aux = DEF_ARMOR(equ, aux);
-		EFFECT(fighter, DEF).value += aux;
-		int pd = EFFECT(fighter, DODGE).value - DODGE_ARMOR(aux);
-		EFFECT(fighter, DODGE).value = pd > 0 ? pd : 0;
 	}
 
 	return 0;
@@ -133,7 +179,7 @@ equip(unsigned who_ref, unsigned eq_ref)
 	unsigned eql = EQL(eeq->eqw);
 
 	if (!eql || equipper[eql] > 0
-	    || equip_affect(&fighter, eeq))
+	    || equip_affect(who_ref, &fighter, eeq))
 		return 1;
 
 	equipper[eql] = eq_ref;
@@ -143,7 +189,7 @@ equip(unsigned who_ref, unsigned eq_ref)
 	nd_put(equipper_hd, &who_ref, equipper);
 	mcp_content_out(who_ref, eq_ref);
 	mcp_equipment(who_ref);
-	SIC_CALL(NULL, on_equip, who_ref);
+	call_on_equip(who_ref);
 	return 0;
 }
 
@@ -169,30 +215,13 @@ unequip(unsigned player_ref, unsigned eql)
 	eqt = EQT(eeq->eqw);
 	aux = 0;
 
-	switch (eql) {
-	case BP_RHAND:
-		EFFECT(&fighter, DMG).value -= DMG_WEAPON(eeq);
-		break;
-	case BP_LEGS:
-	case BP_HEAD:
-		aux = 1;
-	case BP_CHEST:
-		switch (eqt) {
-		case ARMOR_LIGHT: aux += 2; break;
-		case ARMOR_MEDIUM: aux += 1; break;
-		}
-		aux = DEF_ARMOR(eeq, aux);
-		EFFECT(&fighter, DEF).value -= aux;
-		EFFECT(&fighter, DODGE).value += DODGE_ARMOR(aux);
-	}
-
 	equipper[eql] = NOTHING;
 	eeq->flags &= ~EQF_EQUIPPED;
 	nd_put(equipper_hd, &player_ref, equipper);
 	nd_put(fighter_hd, &player_ref, &fighter);
 	mcp_content_in(player_ref, eq_ref);
 	mcp_equipment(player_ref);
-	SIC_CALL(NULL, on_unequip, player_ref);
+	call_on_unequip(player_ref);
 	return eq_ref;
 }
 
@@ -213,7 +242,7 @@ int on_birth(unsigned ent_ref, uint64_t v) {
 		OBJ oeq;
 		nd_get(HD_OBJ, &oeq, &eq);
 		EQU *eeq = (EQU *) &oeq.data;
-		equip_affect(&fighter, eeq);
+		equip_affect(ent_ref, &fighter, eeq);
 	}
 
 	nd_put(fighter_hd, &ent_ref, &fighter);
