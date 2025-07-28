@@ -1,13 +1,14 @@
-#include <nd/nd.h>
-#include <nd/attr.h>
-#include <nd/fight.h>
 #include "./include/uapi/equip.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 
+#include <nd/nd.h>
+#include <nd/attr.h>
+#include <nd/fight.h>
+
 #define EQT(x)		(x>>6)
 #define EQL(x)		(x & 15)
-#define WTS_WEAPON(equ) phys_wts[EQT(equ->eqw)]
 #define BODYPART_ID(_c) ch_bodypart_map[(int) _c]
 
 #define RARE_MAX 6
@@ -23,11 +24,45 @@
 #define DEF_ARMOR(equ, aux) (IE(equ, DEF_G) >> aux)
 #define DMG_WEAPON(equ) IE(equ, DMG_G)
 
+enum equipment_flags {
+	EQF_EQUIPPED = 1,
+};
+
+enum bodypart {
+	BP_NULL,
+	BP_HEAD,
+	BP_NECK,
+	BP_CHEST,
+	BP_BACK,
+	BP_RHAND,
+	BP_LFINGER,
+	BP_RFINGER,
+	BP_LEGS,
+	BP_MAX,
+};
+
+enum armor_type {
+	ARMOR_LIGHT,
+	ARMOR_MEDIUM,
+	ARMOR_HEAVY,
+};
+
+typedef struct {
+	unsigned short eqw, msv;
+} SEQU;
+
+typedef struct {
+	unsigned eqw;
+	unsigned msv;
+	unsigned rare;
+	unsigned flags;
+} EQU;
+
+typedef unsigned equipper_t[BP_MAX];
+
 unsigned type_equipment, bcp_equipment, equipper_hd;
-unsigned fighter_hd;
 
 enum bodypart ch_bodypart_map[] = {
-	[0 ... 254] = 0,
 	['h'] = BP_HEAD,
 	['n'] = BP_NECK,
 	['c'] = BP_CHEST,
@@ -56,7 +91,6 @@ void
 mcp_equipment(unsigned player_ref)
 {
 	equipper_t equipper;
-	unsigned aux;
 
 	nd_get(equipper_hd, equipper, &player_ref);
 
@@ -80,7 +114,7 @@ int on_examine(unsigned player_ref, unsigned ref, unsigned type) {
 	return 0;
 }
 
-short equip_effect(equipper_t equipper, unsigned eql) {
+unsigned equip_effect(equipper_t equipper, unsigned eql) {
 	OBJ obj;
 	unsigned aux = equipper[eql], eqt;
 	EQU *equ = (EQU *) &obj.data;
@@ -114,12 +148,12 @@ short equip_effect(equipper_t equipper, unsigned eql) {
 	return DEF_ARMOR(equ, aux);
 }
 
-short effect(unsigned ref, enum affect af) {
+long effect(unsigned ref, enum affect af) {
 	equipper_t equipper;
-	unsigned aux, eqt, eql;
+	unsigned aux;
 	OBJ obj;
 	EQU *equ = (EQU *) &obj.data;
-	short last;
+	long last;
 	sic_last(&last);
 
 	switch (af) {
@@ -136,6 +170,8 @@ short effect(unsigned ref, enum affect af) {
 		       return last;
 	}
 
+	nd_get(equipper_hd, equipper, &ref);
+
 	aux = equip_effect(equipper, BP_LEGS)
 		+ equip_effect(equipper, BP_CHEST)
 		+ equip_effect(equipper, BP_HEAD);
@@ -147,8 +183,24 @@ short effect(unsigned ref, enum affect af) {
 	return pd > 0 ? pd : 0;
 }
 
+unsigned fighter_wt(unsigned ref) {
+	equipper_t equipper;
+	OBJ eq;
+	EQU *equ = (EQU *) &eq.data;
+
+	nd_get(equipper_hd, equipper, &ref);
+	if (equipper[BP_RHAND] == NOTHING) {
+		unsigned last;
+		sic_last(&last);
+		return last;
+	}
+
+	nd_get(HD_OBJ, &eq, &equipper[BP_RHAND]);
+	return EQT(equ->eqw);
+}
+
 int
-equip_affect(unsigned ref, fighter_t *fighter, EQU *equ)
+equip_affect(unsigned ref, EQU *equ)
 {
 	register unsigned msv = equ->msv,
 		 eqw = equ->eqw,
@@ -159,7 +211,6 @@ equip_affect(unsigned ref, fighter_t *fighter, EQU *equ)
 	case BP_RHAND:
 		if (call_stat(ref, ATTR_STR) < msv)
 			return 1;
-		fighter->wtst = EQT(equ->eqw);
 		break;
 
 	case BP_HEAD:
@@ -189,17 +240,15 @@ equip_affect(unsigned ref, fighter_t *fighter, EQU *equ)
 int
 equip(unsigned who_ref, unsigned eq_ref)
 {
-	fighter_t fighter;
 	equipper_t equipper;
 	OBJ eq;
 	nd_get(HD_OBJ, &eq, &eq_ref);
 	nd_get(equipper_hd, equipper, &who_ref);
-	nd_get(fighter_hd, &fighter, &who_ref);
 	EQU *eeq = (EQU *) &eq.data;
 	unsigned eql = EQL(eeq->eqw);
 
 	if (!eql || equipper[eql] > 0
-	    || equip_affect(who_ref, &fighter, eeq))
+	    || equip_affect(who_ref, eeq))
 		return 1;
 
 	equipper[eql] = eq_ref;
@@ -216,13 +265,9 @@ equip(unsigned who_ref, unsigned eq_ref)
 unsigned
 unequip(unsigned player_ref, unsigned eql)
 {
-	fighter_t fighter;
-	ENT eplayer = ent_get(player_ref);
 	equipper_t equipper;
 	unsigned eq_ref;
-	unsigned eqt, aux;
 
-	nd_get(fighter_hd, &fighter, &player_ref);
 	nd_get(equipper_hd, equipper, &player_ref);
 	eq_ref = equipper[eql];
 
@@ -232,32 +277,14 @@ unequip(unsigned player_ref, unsigned eql)
 	OBJ eq;
 	nd_get(HD_OBJ, &eq, &eq_ref);
 	EQU *eeq = (EQU *) &eq.data;
-	eqt = EQT(eeq->eqw);
-	aux = 0;
 
 	equipper[eql] = NOTHING;
 	eeq->flags &= ~EQF_EQUIPPED;
 	nd_put(equipper_hd, &player_ref, equipper);
-	nd_put(fighter_hd, &player_ref, &fighter);
 	mcp_content_in(player_ref, eq_ref);
 	mcp_equipment(player_ref);
 	call_on_unequip(player_ref);
 	return eq_ref;
-}
-
-int on_birth(unsigned ent_ref, uint64_t v) {
-	equipper_t equipper;
-	int i;
-
-	memset(equipper, 0, sizeof(equipper));
-
-	for (i = 0; i < BP_MAX; i++) {
-		equipper[i] = NOTHING;
-		// TODO make sure mobs equipment affects them
-	}
-
-	nd_put(equipper_hd, &ent_ref, equipper);
-	return 0;
 }
 
 static inline int
@@ -276,12 +303,20 @@ rarity_get(void) {
 	return 5; // MYTHICAL
 }
 
-int on_add(unsigned ref, unsigned type, uint64_t v)
+int on_add(unsigned ref, unsigned type, uint64_t v __attribute__((unused)))
 {
 	OBJ obj;
 	SKEL skel;
 	SEQU *sequ;
 	EQU *enu;
+
+	if (type == TYPE_ENTITY) {
+		equipper_t equipper;
+		for (int i = 0; i < BP_MAX; i++)
+			equipper[i] = NOTHING;
+		nd_put(equipper_hd, &ref, equipper);
+		return 0;
+	}
 
 	if (type != type_equipment)
 		return 1;
@@ -355,16 +390,11 @@ do_unequip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__(
 }
 
 void mod_open(void *arg __attribute__((unused))) {
-	SIC_AREG(on_equip);
-	SIC_AREG(on_unequip);
-
 	nd_len_reg("equipper", sizeof(equipper_t));
 	equipper_hd = nd_open("equipper", "u", "equipper", 0);
 
 	type_equipment = nd_put(HD_TYPE, NULL, "equipment");
 	bcp_equipment = nd_put(HD_BCP, NULL, "equipment");
-
-	nd_get(HD_HD, &fighter_hd, "fighter");
 
 	action_register("equip", "👕");
 
