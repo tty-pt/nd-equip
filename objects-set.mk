@@ -1,0 +1,1 @@
+CFLAGS-libnd-equip-o := -fPIC

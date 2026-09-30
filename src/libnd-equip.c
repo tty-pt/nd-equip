@@ -1,17 +1,44 @@
-#include "./include/uapi/equip.h"
+/* src/libnd-equip.c — nd-equip, ported to libxylem.
+ *
+ * Owns equipment: what is worn where, stat requirements, rarity, the equipment
+ * BCP frame, and the equip/unequip commands. Co-implements nd-attr's `effect`
+ * chain (weapon damage, armour defence/dodge) and nd-fight's `fighter_wt`
+ * chain (wielded weapon weight).
+ *
+ * Original: tty-pt/nd-equip @ 409 lines main.c, from the nd-basics
+ * superproject.
+ *
+ * This TU XY_IMPLs effect and fighter_wt. `effect` is declared in nd-attr's
+ * header, so ATTR_IMPL is defined before including it -- an XY_IMPL and an
+ * XY_DECL of the same name in one TU is the XY equivalent of the old SIC_DEF
+ * + SIC_DECL collision. The guard suppresses attr.h's XY_DECL(attr_stat) too,
+ * which this TU CALLS, so attr_stat is re-declared manually below. fighter_wt
+ * is declared in nd-fight's header, which is not included at all: nothing else
+ * from it is needed here.
+ *
+ * on_equip / on_unequip are fired but have no implementor in-tree; the
+ * dispatch finds nothing and returns 0. They stay XY_DECL-only in nd/equip.h.
+ */
+
+#include <ttypt/xy-mod.h>
+
+#include <nd/xy.h>
 
 #include <stdlib.h>
-#include <stdio.h>
 
-#include <nd/nd.h>
+#define ATTR_IMPL
 #include <nd/attr.h>
-#include <nd/fight.h>
+
+#include <nd/equip.h>
+
+/* attr_stat is called but not implemented here. The ATTR_IMPL guard above
+ * suppresses the header's XY_DECLs (to protect the effect name this TU
+ * XY_IMPLs), so it is re-declared here verbatim from nd/attr.h. */
+XY_DECL(unsigned, attr_stat, unsigned, ref, enum attribute, at);
 
 #define EQT(x)		(x>>6)
 #define EQL(x)		(x & 15)
 #define BODYPART_ID(_c) ch_bodypart_map[(int) _c]
-
-#define RARE_MAX 6
 
 #define MSRA(ms, ra, G) G(ms) * (ra + 1) / RARE_MAX
 #define IE(equ, G) MSRA(equ->msv, equ->rare, G)
@@ -60,9 +87,9 @@ typedef struct {
 
 typedef unsigned equipper_t[BP_MAX];
 
-unsigned type_equipment, bcp_equipment, equipper_hd;
+static unsigned type_equipment, bcp_equipment, equipper_hd;
 
-enum bodypart ch_bodypart_map[] = {
+static enum bodypart ch_bodypart_map[] = {
 	['h'] = BP_HEAD,
 	['n'] = BP_NECK,
 	['c'] = BP_CHEST,
@@ -73,21 +100,13 @@ enum bodypart ch_bodypart_map[] = {
 	['g'] = BP_LEGS,
 };
 
-SIC_DEF(int, on_equip, unsigned, who_ref);
-SIC_DEF(int, on_unequip, unsigned, who_ref);
+/* API. XY_IMPL both defines the function and emits the dispatch adapter, so
+ * each name gets exactly one, with its body -- no forward declarations.
+ *
+ * Order matters below: XY_IMPL emits a definition, so a caller has to come
+ * after its callee. mcp_equipment leads because equip/unequip call it. */
 
-#if 0
-static const char *rarity_str[] = {
-	ANSI_BOLD ANSI_FG_BLACK "Poor" ANSI_RESET,
-	"",
-	ANSI_BOLD "Uncommon" ANSI_RESET,
-	ANSI_BOLD ANSI_FG_CYAN "Rare" ANSI_RESET,
-	ANSI_BOLD ANSI_FG_GREEN "Epic" ANSI_RESET,
-	ANSI_BOLD ANSI_FG_MAGENTA "Mythical" ANSI_RESET
-};
-#endif
-
-void
+static void
 mcp_equipment(unsigned player_ref)
 {
 	equipper_t equipper;
@@ -104,17 +123,18 @@ mcp_equipment(unsigned player_ref)
 	}
 }
 
-int on_examine(unsigned player_ref, unsigned ref, unsigned type) {
+XY_IMPL(int, on_examine, unsigned, player_ref, unsigned, ref, unsigned, type)
+{
 	OBJ obj;
 	EQU *equ = (EQU *) &obj.data;
 	if (type != type_equipment)
 		return 1;
 	nd_get(HD_OBJ, &obj, &ref);
-	nd_writef(player_ref, "Equip: eqw %u msv %u.\n", equ->eqw, equ->msv);
+	nd_printf(player_ref, "Equip: eqw %u msv %u.\n", equ->eqw, equ->msv);
 	return 0;
 }
 
-unsigned equip_effect(equipper_t equipper, unsigned eql) {
+static unsigned equip_effect(equipper_t equipper, unsigned eql) {
 	OBJ obj;
 	unsigned aux = equipper[eql], eqt;
 	EQU *equ = (EQU *) &obj.data;
@@ -148,13 +168,16 @@ unsigned equip_effect(equipper_t equipper, unsigned eql) {
 	return DEF_ARMOR(equ, aux);
 }
 
-long effect(unsigned ref, enum affect af) {
+/* Co-implementor of nd-attr's effect chain: equipment bonuses on top of the
+ * base value. nd_last() gives us whatever ran before us in this dispatch. */
+XY_IMPL(long, effect, unsigned, ref, enum affect, af)
+{
 	equipper_t equipper;
 	unsigned aux;
 	OBJ obj;
 	EQU *equ = (EQU *) &obj.data;
 	long last;
-	sic_last(&last);
+	nd_last(&last);
 
 	switch (af) {
 		case AF_DMG:
@@ -183,7 +206,10 @@ long effect(unsigned ref, enum affect af) {
 	return pd > 0 ? pd : 0;
 }
 
-unsigned fighter_wt(unsigned ref) {
+/* Co-implementor of nd-fight's fighter_wt chain: wielded weapon weight, or
+ * the predecessor's value when bare-handed. */
+XY_IMPL(unsigned, fighter_wt, unsigned, ref)
+{
 	equipper_t equipper;
 	OBJ eq;
 	EQU *equ = (EQU *) &eq.data;
@@ -191,7 +217,7 @@ unsigned fighter_wt(unsigned ref) {
 	nd_get(equipper_hd, equipper, &ref);
 	if (equipper[BP_RHAND] == NOTHING) {
 		unsigned last;
-		sic_last(&last);
+		nd_last(&last);
 		return last;
 	}
 
@@ -199,7 +225,7 @@ unsigned fighter_wt(unsigned ref) {
 	return EQT(equ->eqw);
 }
 
-int
+static int
 equip_affect(unsigned ref, EQU *equ)
 {
 	register unsigned msv = equ->msv,
@@ -209,7 +235,7 @@ equip_affect(unsigned ref, EQU *equ)
 
 	switch (eql) {
 	case BP_RHAND:
-		if (call_stat(ref, ATTR_STR) < msv)
+		if (attr_stat(ref, ATTR_STR) < msv)
 			return 1;
 		break;
 
@@ -219,17 +245,17 @@ equip_affect(unsigned ref, EQU *equ)
 
 		switch (eqt) {
 		case ARMOR_LIGHT:
-			if (call_stat(ref, ATTR_DEX) < msv)
+			if (attr_stat(ref, ATTR_DEX) < msv)
 				return 1;
 			break;
 		case ARMOR_MEDIUM:
 			msv /= 2;
-			if (call_stat(ref, ATTR_STR) < msv
-				|| call_stat(ref, ATTR_DEX) < msv)
+			if (attr_stat(ref, ATTR_STR) < msv
+				|| attr_stat(ref, ATTR_DEX) < msv)
 				return 1;
 			break;
 		case ARMOR_HEAVY:
-			if (call_stat(ref, ATTR_STR) < msv)
+			if (attr_stat(ref, ATTR_STR) < msv)
 				return 1;
 		}
 	}
@@ -237,7 +263,7 @@ equip_affect(unsigned ref, EQU *equ)
 	return 0;
 }
 
-int
+static int
 equip(unsigned who_ref, unsigned eq_ref)
 {
 	equipper_t equipper;
@@ -254,15 +280,15 @@ equip(unsigned who_ref, unsigned eq_ref)
 	equipper[eql] = eq_ref;
 	eeq->flags |= EQF_EQUIPPED;
 
-	nd_writef(who_ref, "You equip %s.\n", eq.name);
+	nd_printf(who_ref, "You equip %s.\n", eq.name);
 	nd_put(equipper_hd, &who_ref, equipper);
 	mcp_content_out(who_ref, eq_ref);
 	mcp_equipment(who_ref);
-	call_on_equip(who_ref);
+	on_equip(who_ref);
 	return 0;
 }
 
-unsigned
+static unsigned
 unequip(unsigned player_ref, unsigned eql)
 {
 	equipper_t equipper;
@@ -283,7 +309,7 @@ unequip(unsigned player_ref, unsigned eql)
 	nd_put(equipper_hd, &player_ref, equipper);
 	mcp_content_in(player_ref, eq_ref);
 	mcp_equipment(player_ref);
-	call_on_unequip(player_ref);
+	on_unequip(player_ref);
 	return eq_ref;
 }
 
@@ -303,13 +329,14 @@ rarity_get(void) {
 	return 5; // MYTHICAL
 }
 
-int on_add(unsigned ref, unsigned type, uint64_t v __attribute__((unused)))
+XY_IMPL(int, on_add, unsigned, ref, unsigned, type, uint64_t, v)
 {
 	OBJ obj;
 	SKEL skel;
 	SEQU *sequ;
 	EQU *enu;
 
+	(void) v;
 	if (type == TYPE_ENTITY) {
 		equipper_t equipper;
 		for (int i = 0; i < BP_MAX; i++)
@@ -334,7 +361,8 @@ int on_add(unsigned ref, unsigned type, uint64_t v __attribute__((unused)))
 	return 0;
 }
 
-int on_leave(unsigned ref, unsigned loc_ref) {
+XY_IMPL(int, on_leave, unsigned, ref, unsigned, loc_ref)
+{
 	OBJ obj, loc;
 
 	nd_get(HD_OBJ, &obj, &ref);
@@ -357,12 +385,13 @@ int on_leave(unsigned ref, unsigned loc_ref) {
 	return 0;
 }
 
-int on_auth(unsigned player_ref) {
+XY_IMPL(int, on_auth, unsigned, player_ref)
+{
 	mcp_equipment(player_ref);
 	return 0;
 }
 
-void
+static void
 do_equip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
 {
 	unsigned player_ref = fd_player(fd);
@@ -370,12 +399,12 @@ do_equip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((u
 	unsigned eq_ref = ematch_mine(player_ref, name);
 
 	if (eq_ref == NOTHING)
-		nd_writef(player_ref, "You are not carrying that.\n");
+		nd_printf(player_ref, "You are not carrying that.\n");
 	else if (equip(player_ref, eq_ref)) 
-		nd_writef(player_ref, "You can't equip that.\n");
+		nd_printf(player_ref, "You can't equip that.\n");
 }
 
-void
+static void
 do_unequip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
 {
 	unsigned player_ref = fd_player(fd);
@@ -384,26 +413,24 @@ do_unequip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__(
 	unsigned eq_ref;
 
 	if ((eq_ref = unequip(player_ref, bp)) == NOTHING) {
-		nd_writef(player_ref, CANTDO_MESSAGE);
+		nd_printf(player_ref, "You can't do that.\n");
 		return;
 	}
 }
 
-void mod_open(void *arg __attribute__((unused))) {
+XY_MODULE_API void
+xy_install(void)
+{
+	/* The original mod_install took an arg and forwarded it to mod_open,
+	 * which ignored it. xy_install takes none; the open sequence is inline. */
 	nd_len_reg("equipper", sizeof(equipper_t));
-	equipper_hd = nd_open("equipper", "u", "equipper", 0);
+	equipper_hd = (unsigned)nd_open("equipper", "u", "equipper", 0);
 
-	type_equipment = nd_put(HD_TYPE, NULL, "equipment");
-	bcp_equipment = nd_put(HD_BCP, NULL, "equipment");
+	type_equipment = (unsigned)nd_put(HD_TYPE, NULL, "equipment");
+	bcp_equipment = (unsigned)nd_put(HD_BCP, NULL, "equipment");
 
 	action_register("equip", "👕");
 
 	nd_register("equip", do_equip, 0);
 	nd_register("unequip", do_unequip, 0);
-
 }
-
-void mod_install(void *arg) {
-	mod_open(arg);
-}
-
