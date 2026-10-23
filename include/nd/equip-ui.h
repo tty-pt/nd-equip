@@ -15,10 +15,6 @@
 extern "C" {
 #endif
 
-#ifdef ND_EQUIP_UI_IMPL
-nd_equipment_state_t g_nd_equipment = {{0}};
-#endif
-
 static inline int
 on_equip_modal_close(bud_event *ev)
 {
@@ -42,39 +38,27 @@ on_equip_card_click(bud_event *ev)
 }
 
 static inline bud_node *
-nd_equip_make_cell(const char *slot_name, const char *label, uint32_t item_ref)
+nd_equip_make_cell(const nd_equip_slot_desc_t *d, uint32_t item_ref)
 {
 	bud_node *cell = bud_element("div");
-	if (!slot_name) {
+	if (!d) {
 		bud_set_attr(cell, "class", "w-[24px] h-[24px] p-2 box-border");
 		return cell;
 	}
 
-	char class_buf[160];
+	char class_buf[200];
 	snprintf(class_buf, sizeof(class_buf),
 		"btn w-[24px] h-[24px] p-2 box-border flex items-center justify-center text-xs "
 		"border %s cursor-pointer select-none",
 		(item_ref > 0) ? "border-[#9589c5] bg-neutral-800 text-neutral-100"
 		               : "border-neutral-700/60 bg-neutral-900/60 text-neutral-500");
 	bud_set_attr(cell, "class", class_buf);
-	bud_set_attr(cell, "data-slot", slot_name);
-	bud_set_attr(cell, "title", label);
+	bud_set_attr(cell, "data-slot", d->key);
+	bud_set_attr(cell, "title", d->label);
 
-	if (slot_name) {
-		const char *letter = "h";
-		if (strcmp(slot_name, "head") == 0) letter = "h";
-		else if (strcmp(slot_name, "neck") == 0) letter = "n";
-		else if (strcmp(slot_name, "chest") == 0) letter = "c";
-		else if (strcmp(slot_name, "back") == 0) letter = "b";
-		else if (strcmp(slot_name, "pants") == 0) letter = "g";
-		else if (strcmp(slot_name, "rhand") == 0) letter = "w";
-		else if (strcmp(slot_name, "lhand") == 0) letter = "s";
-		else if (strcmp(slot_name, "rfinger") == 0) letter = "r";
-		else if (strcmp(slot_name, "lfinger") == 0) letter = "l";
-		char cmd_buf[32];
-		snprintf(cmd_buf, sizeof(cmd_buf), "unequip %s", letter);
-		bud_set_attr(cell, "data-cmd", cmd_buf);
-	}
+	char cmd_buf[32];
+	snprintf(cmd_buf, sizeof(cmd_buf), "unequip %c", d->cmd);
+	bud_set_attr(cell, "data-cmd", cmd_buf);
 
 	if (item_ref > 0) {
 		char ref_buf[16];
@@ -86,10 +70,26 @@ nd_equip_make_cell(const char *slot_name, const char *label, uint32_t item_ref)
 	return cell;
 }
 
+/* Grid dimensions are derived from the descriptor table, not hard-coded. */
+static inline void
+nd_equip_grid_dims(unsigned *rows, unsigned *cols)
+{
+	unsigned r = 0, c = 0;
+	for (size_t i = 0; i < ND_EQUIP_SLOT_COUNT; i++) {
+		if (nd_equip_slots[i].row + 1u > r) r = nd_equip_slots[i].row + 1u;
+		if (nd_equip_slots[i].col + 1u > c) c = nd_equip_slots[i].col + 1u;
+	}
+	*rows = r;
+	*cols = c;
+}
+
 static inline bud_node *
 nd_equip_render_modal(const void *st)
 {
-	(void)st;
+	static const uint32_t k_no_slots[ND_BP_MAX] = {0};
+	const nd_equipment_state_t *eq = (const nd_equipment_state_t *)
+		nd_client_ext_get((const nd_client_state_t *)st, ND_EQUIP_EXT_KEY);
+	const uint32_t *slots = eq ? eq->slots : k_no_slots;
 	const char *active = nd_ui_get_active_modal();
 	int is_open = (active && strcmp(active, "equip") == 0);
 
@@ -105,41 +105,20 @@ nd_equip_render_modal(const void *st)
 	bud_set_attr(doll, "class", "flex flex-col gap-2 p-2 border border-[#9589c5] bg-[#2c2c2c]/90 shadow-2xl");
 	bud_bind(doll, "click", 1, on_equip_card_click);
 
-	/* Row 0: [ ] [ ] [HEAD] [ ] [ ] */
-	bud_node *r0 = bud_element("div"); bud_set_attr(r0, "class", "flex gap-2");
-	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r0, nd_equip_make_cell("head", "Head", g_nd_equipment.slots[ND_BP_HEAD]));
-	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(doll, r0);
-
-	/* Row 1: [RHAND] [ ] [NECK] [BACK] [LHAND] */
-	bud_node *r1 = bud_element("div"); bud_set_attr(r1, "class", "flex gap-2");
-	bud_append(r1, nd_equip_make_cell("rhand", "Right Hand", g_nd_equipment.slots[ND_BP_RHAND]));
-	bud_append(r1, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r1, nd_equip_make_cell("neck", "Neck", g_nd_equipment.slots[ND_BP_NECK]));
-	bud_append(r1, nd_equip_make_cell("back", "Back", g_nd_equipment.slots[ND_BP_BACK]));
-	bud_append(r1, nd_equip_make_cell("lhand", "Left Hand", g_nd_equipment.slots[ND_BP_LHAND]));
-	bud_append(doll, r1);
-
-	/* Row 2: [RFINGER] [ ] [CHEST] [ ] [LFINGER] */
-	bud_node *r2 = bud_element("div"); bud_set_attr(r2, "class", "flex gap-2");
-	bud_append(r2, nd_equip_make_cell("rfinger", "Right Finger", g_nd_equipment.slots[ND_BP_RFINGER]));
-	bud_append(r2, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r2, nd_equip_make_cell("chest", "Chest", g_nd_equipment.slots[ND_BP_CHEST]));
-	bud_append(r2, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r2, nd_equip_make_cell("lfinger", "Left Finger", g_nd_equipment.slots[ND_BP_LFINGER]));
-	bud_append(doll, r2);
-
-	/* Row 3: [ ] [ ] [PANTS] [ ] [ ] */
-	bud_node *r3 = bud_element("div"); bud_set_attr(r3, "class", "flex gap-2");
-	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r3, nd_equip_make_cell("pants", "Pants", g_nd_equipment.slots[ND_BP_PANTS]));
-	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
-	bud_append(doll, r3);
+	unsigned rows, cols;
+	nd_equip_grid_dims(&rows, &cols);
+	for (unsigned r = 0; r < rows; r++) {
+		bud_node *row = bud_element("div");
+		bud_set_attr(row, "class", "flex gap-2");
+		for (unsigned c = 0; c < cols; c++) {
+			const nd_equip_slot_desc_t *d = NULL;
+			for (size_t i = 0; i < ND_EQUIP_SLOT_COUNT; i++)
+				if (nd_equip_slots[i].row == r && nd_equip_slots[i].col == c)
+					d = &nd_equip_slots[i];
+			bud_append(row, nd_equip_make_cell(d, d ? slots[d->slot_id] : 0));
+		}
+		bud_append(doll, row);
+	}
 
 	bud_append(overlay, doll);
 	return overlay;
