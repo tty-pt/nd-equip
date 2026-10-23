@@ -19,6 +19,53 @@ extern "C" {
 nd_equipment_state_t g_nd_equipment = {{0}};
 #endif
 
+static inline int
+on_equip_modal_close(bud_event *ev)
+{
+	(void)ev;
+	nd_ui_set_active_modal("");
+#ifdef __wasm__
+	bud_app_set_state();
+#endif
+	return 0;
+}
+
+static inline int
+on_equip_card_click(bud_event *ev)
+{
+	if (ev) bud_event_stop_propagation(ev);
+	return 1;
+}
+
+static inline bud_node *
+nd_equip_make_cell(const char *slot_name, const char *label, uint32_t item_ref)
+{
+	bud_node *cell = bud_element("div");
+	if (!slot_name) {
+		bud_set_attr(cell, "class", "w-[24px] h-[24px] p-2 box-border");
+		return cell;
+	}
+
+	char class_buf[160];
+	snprintf(class_buf, sizeof(class_buf),
+		"btn w-[24px] h-[24px] p-2 box-border flex items-center justify-center text-xs "
+		"border %s cursor-pointer select-none",
+		(item_ref > 0) ? "border-[#9589c5] bg-neutral-800 text-neutral-100"
+		               : "border-neutral-700/60 bg-neutral-900/60 text-neutral-500");
+	bud_set_attr(cell, "class", class_buf);
+	bud_set_attr(cell, "data-slot", slot_name);
+	bud_set_attr(cell, "title", label);
+
+	if (item_ref > 0) {
+		char ref_buf[16];
+		snprintf(ref_buf, sizeof(ref_buf), "#%u", item_ref);
+		bud_append(cell, bud_text(ref_buf));
+	} else {
+		bud_append(cell, bud_text("·"));
+	}
+	return cell;
+}
+
 static inline bud_node *
 nd_equip_render_modal(const void *st)
 {
@@ -33,50 +80,51 @@ nd_equip_render_modal(const void *st)
 
 	bud_node *overlay = bud_element("div");
 	bud_set_attr(overlay, "id", "equipment-modal");
-	bud_set_attr(overlay, "class", "fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4");
+	bud_set_attr(overlay, "class", "modal fixed inset-0 z-50 flex items-center justify-center bg-black/60");
+	bud_bind(overlay, "click", 0, on_equip_modal_close);
 
-	bud_node *card = bud_element("div");
-	bud_set_attr(card, "class", "bg-neutral-900 border border-neutral-700 rounded-lg p-6 max-w-sm w-full flex flex-col gap-4 shadow-xl");
+	bud_node *doll = bud_element("div");
+	bud_set_attr(doll, "id", "equipment");
+	bud_set_attr(doll, "class", "flex flex-col gap-2 p-2 border border-[#9589c5] bg-[#2c2c2c]/90 shadow-2xl");
+	bud_bind(doll, "click", 1, on_equip_card_click);
 
-	bud_node *header = bud_element("div");
-	bud_set_attr(header, "class", "flex justify-between items-center border-b border-neutral-800 pb-2");
-	bud_node *title = bud_element("h2");
-	bud_set_attr(title, "class", "text-lg font-bold text-neutral-200");
-	bud_append(title, bud_text("Equipment Doll"));
-	bud_append(header, title);
+	/* Row 0: [ ] [ ] [HEAD] [ ] [ ] */
+	bud_node *r0 = bud_element("div"); bud_set_attr(r0, "class", "flex gap-2");
+	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r0, nd_equip_make_cell("head", "Head", g_nd_equipment.slots[ND_BP_HEAD]));
+	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r0, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(doll, r0);
 
-	bud_node *close_btn = bud_element("button");
-	bud_set_attr(close_btn, "type", "button");
-	bud_set_attr(close_btn, "class", "text-neutral-400 hover:text-neutral-100 text-sm");
-	bud_append(close_btn, bud_text("✕"));
-	/* click handler to close modal */
-	bud_append(header, close_btn);
-	bud_append(card, header);
+	/* Row 1: [RHAND] [ ] [NECK] [BACK] [LHAND] */
+	bud_node *r1 = bud_element("div"); bud_set_attr(r1, "class", "flex gap-2");
+	bud_append(r1, nd_equip_make_cell("rhand", "Right Hand", g_nd_equipment.slots[ND_BP_RHAND]));
+	bud_append(r1, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r1, nd_equip_make_cell("neck", "Neck", g_nd_equipment.slots[ND_BP_NECK]));
+	bud_append(r1, nd_equip_make_cell("back", "Back", g_nd_equipment.slots[ND_BP_BACK]));
+	bud_append(r1, nd_equip_make_cell("lhand", "Left Hand", g_nd_equipment.slots[ND_BP_LHAND]));
+	bud_append(doll, r1);
 
-	bud_node *list = bud_tpl(
-		"<div class='flex flex-col gap-2 text-sm font-mono text-neutral-200'>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Head:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Neck:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Chest:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Back:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Pants:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Right Hand:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Left Hand:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between border-b border-neutral-800 py-1'><span class='text-neutral-400'>Right Finger:</span><span>#%u</span></div>"
-		"  <div class='flex justify-between py-1'><span class='text-neutral-400'>Left Finger:</span><span>#%u</span></div>"
-		"</div>",
-		g_nd_equipment.slots[ND_BP_HEAD],
-		g_nd_equipment.slots[ND_BP_NECK],
-		g_nd_equipment.slots[ND_BP_CHEST],
-		g_nd_equipment.slots[ND_BP_BACK],
-		g_nd_equipment.slots[ND_BP_PANTS],
-		g_nd_equipment.slots[ND_BP_RHAND],
-		g_nd_equipment.slots[ND_BP_LHAND],
-		g_nd_equipment.slots[ND_BP_RFINGER],
-		g_nd_equipment.slots[ND_BP_LFINGER]
-	);
-	bud_append(card, list);
-	bud_append(overlay, card);
+	/* Row 2: [RFINGER] [ ] [CHEST] [ ] [LFINGER] */
+	bud_node *r2 = bud_element("div"); bud_set_attr(r2, "class", "flex gap-2");
+	bud_append(r2, nd_equip_make_cell("rfinger", "Right Finger", g_nd_equipment.slots[ND_BP_RFINGER]));
+	bud_append(r2, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r2, nd_equip_make_cell("chest", "Chest", g_nd_equipment.slots[ND_BP_CHEST]));
+	bud_append(r2, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r2, nd_equip_make_cell("lfinger", "Left Finger", g_nd_equipment.slots[ND_BP_LFINGER]));
+	bud_append(doll, r2);
+
+	/* Row 3: [ ] [ ] [PANTS] [ ] [ ] */
+	bud_node *r3 = bud_element("div"); bud_set_attr(r3, "class", "flex gap-2");
+	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r3, nd_equip_make_cell("pants", "Pants", g_nd_equipment.slots[ND_BP_PANTS]));
+	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(r3, nd_equip_make_cell(NULL, NULL, 0));
+	bud_append(doll, r3);
+
+	bud_append(overlay, doll);
 	return overlay;
 }
 
