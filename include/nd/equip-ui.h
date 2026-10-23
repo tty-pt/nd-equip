@@ -22,7 +22,11 @@ nd_equipment_state_t g_nd_equipment = {{0}};
 static inline int
 on_equip_modal_close(bud_event *ev)
 {
-	(void)ev;
+	if (ev && ev->target) {
+		const char *id = bud_get_attr(ev->target, "id");
+		if (!id || strcmp(id, "equipment-modal") != 0)
+			return 0;
+	}
 	nd_ui_set_active_modal("");
 #ifdef __wasm__
 	bud_app_set_state();
@@ -55,6 +59,22 @@ nd_equip_make_cell(const char *slot_name, const char *label, uint32_t item_ref)
 	bud_set_attr(cell, "class", class_buf);
 	bud_set_attr(cell, "data-slot", slot_name);
 	bud_set_attr(cell, "title", label);
+
+	if (slot_name) {
+		const char *letter = "h";
+		if (strcmp(slot_name, "head") == 0) letter = "h";
+		else if (strcmp(slot_name, "neck") == 0) letter = "n";
+		else if (strcmp(slot_name, "chest") == 0) letter = "c";
+		else if (strcmp(slot_name, "back") == 0) letter = "b";
+		else if (strcmp(slot_name, "pants") == 0) letter = "g";
+		else if (strcmp(slot_name, "rhand") == 0) letter = "w";
+		else if (strcmp(slot_name, "lhand") == 0) letter = "s";
+		else if (strcmp(slot_name, "rfinger") == 0) letter = "r";
+		else if (strcmp(slot_name, "lfinger") == 0) letter = "l";
+		char cmd_buf[32];
+		snprintf(cmd_buf, sizeof(cmd_buf), "unequip %s", letter);
+		bud_set_attr(cell, "data-cmd", cmd_buf);
+	}
 
 	if (item_ref > 0) {
 		char ref_buf[16];
