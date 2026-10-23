@@ -71,16 +71,13 @@ nd_equip_render_modal(const void *st)
 {
 	(void)st;
 	const char *active = nd_ui_get_active_modal();
-	if (!active || strcmp(active, "equip") != 0) {
-		bud_node *empty = bud_element("div");
-		bud_set_attr(empty, "id", "equipment-modal");
-		bud_set_attr(empty, "class", "hidden");
-		return empty;
-	}
+	int is_open = (active && strcmp(active, "equip") == 0);
 
 	bud_node *overlay = bud_element("div");
 	bud_set_attr(overlay, "id", "equipment-modal");
-	bud_set_attr(overlay, "class", "modal fixed inset-0 z-50 flex items-center justify-center bg-black/60");
+	bud_set_attr(overlay, "class", is_open
+		? "modal fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+		: "hidden");
 	bud_bind(overlay, "click", 0, on_equip_modal_close);
 
 	bud_node *doll = bud_element("div");
