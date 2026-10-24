@@ -3,7 +3,7 @@ all := libnd-equip
 LDLIBS-libnd-equip := -lxylem -lm
 
 FOLDER := nd
-add-prefix-glob := ../nd-* ../axil-nd
+add-prefix := ../axil-nd ../nd-region ../nd-session ../nd-world ../nd-view ../nd-obj ../nd-speech ../nd-mcp
 
 
 # macOS ld rejects undefined symbols in shared libs, but WARN needs

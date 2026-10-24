@@ -58,6 +58,24 @@ same command works either way. CI names the deps explicitly
   kit; `on_add` initializes the row; `on_leave` and `on_auth` cover leaving
   and login display.
 
+## In-Game Commands (`man-src/`)
+
+| Command | Section | Description |
+|---------|---------|-------------|
+| `equip` | 10 | Equip weapons, armor, or rings to corresponding body slots |
+| `unequip` | 10 | Remove worn equipment and return it to inventory |
+
+## Packaged Assets
+
+- **Art (`art/`)**: Equipment sprites and item icons (`dagger.png`, `chainmail_armor_chest.png`, `hide_armor_chest.png`, `padded_armor_chest.png`, etc.).
+- **Manuals (`man-src/`)**: In-game manual pages for equipment commands.
+
+## Wire Protocol & BCP Integration
+
+- Registers `bcp_equipment` dynamically on `HD_BCP`.
+- Transmits 9-slot bodypart array (`BP_HEAD`, `BP_NECK`, `BP_CHEST`, `BP_BACK`, `BP_PANTS`, `BP_RHAND`, `BP_LHAND`, `BP_RFINGER`, `BP_LFINGER`) directly to pure-C isomorphic clients.
+- Registers dynamic client action button `action_register("equip", "👕")`.
+
 ## Testing
 
 There is no `test.sh` here. Behaviour is asserted by the engine's own suite:

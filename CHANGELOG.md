@@ -1,4 +1,17 @@
-## 1.0.2
+## [1.1.0]
+
+- **Paper Doll UI Modal (`ux/equip_ui.c`, `<nd/equip-ui.h>`)**:
+  - Implemented 4x5 paper doll modal overlay with interactive unequip triggers across all 9 body equipment slots.
+  - Adopted universal `BUD_DEFINE_STATE` and `BUD_SLOT_CONTRIBUTE` for equipment UI slot registration.
+- **Declarative BCP Protocol Integration (`<nd/equip-bcp.h>`)**:
+  - Added declarative BCP unpacker for `ND_BCP_EQUIPMENT` frames into per-session `nd_equipment_state_t`.
+  - Added canonical equipment slot descriptor table.
+- **Two-Header Architecture (`<nd/equip-types.h>`)**:
+  - Extracted `<nd/equip-types.h>` and removed `EQUIP_IMPL` preprocessor guards.
+- **Documentation**:
+  - Standardized README with man-src, art, and modder guide.
+
+## [1.0.2]
 
 - **The sibling `-I` lines are gone.** `CFLAGS += -I$(shell cd .. && pwd)/…`
   pointed at the axil-nd/nd sibling checkouts and only existed for a dev

@@ -22,6 +22,7 @@
 
 #include <ttypt/xy-mod.h>
 
+#include <nd/equip-bcp.h>
 #include <nd/xy.h>
 
 #include <stdlib.h>
@@ -390,11 +391,35 @@ XY_IMPL(int, on_auth, unsigned, player_ref)
 	return 0;
 }
 
+/* `equip` with no argument lists what is worn, as a plain-text table that any
+ * viewport (TTY included) can show; the slot layout is the shared descriptor
+ * table in nd/equip-bcp.h. */
 static void
-do_equip(int fd, int argc __attribute__((unused)), char *argv[] __attribute__((unused)))
+list_equipment(unsigned player_ref)
+{
+	equipper_t equipper;
+	nd_equipment_state_t eq;
+	char buf[512];
+
+	memset(&eq, 0, sizeof(eq));
+	nd_get(equipper_hd, equipper, &player_ref);
+	for (unsigned i = 0; i < BP_MAX && i < ND_BP_MAX; i++)
+		eq.slots[i] = (equipper[i] && equipper[i] != NOTHING) ? equipper[i] : 0;
+	nd_equip_format_text(&eq, buf, sizeof(buf));
+	nd_printf(player_ref, "Equipment:\n%s", buf);
+}
+
+static void
+do_equip(int fd, int argc, char *argv[])
 {
 	unsigned player_ref = fd_player(fd);
-	char *name = argv[1];
+	char *name = argc > 1 ? argv[1] : NULL;
+
+	if (!name || !*name) {
+		list_equipment(player_ref);
+		return;
+	}
+
 	unsigned eq_ref = ematch_mine(player_ref, name);
 
 	if (eq_ref == NOTHING)
