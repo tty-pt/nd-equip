@@ -18,11 +18,7 @@ extern "C" {
 static inline int
 on_equip_modal_close(bud_event *ev)
 {
-	if (ev && ev->target) {
-		const char *id = bud_get_attr(ev->target, "id");
-		if (!id || strcmp(id, "equipment-modal") != 0)
-			return 0;
-	}
+	(void)ev;
 	nd_ui_set_active_modal("");
 #ifdef __wasm__
 	bud_app_set_state();
@@ -98,7 +94,7 @@ nd_equip_render_modal(const void *st)
 	bud_set_attr(overlay, "class", is_open
 		? "modal fixed inset-0 z-50 flex items-center justify-center bg-black/60"
 		: "hidden");
-	bud_bind(overlay, "click", 0, on_equip_modal_close);
+	bud_bind(overlay, "click", 1, on_equip_modal_close);
 
 	bud_node *doll = bud_element("div");
 	bud_set_attr(doll, "id", "equipment");
