@@ -1,4 +1,9 @@
-## [1.1.0]
+## [Unreleased] (target: v1.0.4)
+
+### Changed
+- Refactored stllog logging comments, removed add-prefix paths, and cleaned dependencies.
+
+## [1.0.3]
 
 - **Paper Doll UI Modal (`ux/equip_ui.c`, `<nd/equip-ui.h>`)**:
   - Implemented 4x5 paper doll modal overlay with interactive unequip triggers across all 9 body equipment slots.
@@ -19,7 +24,7 @@
   installed packages named in `.github/workflows/ci.yml`. The build now
   resolves `<nd/…>` the way a packager sees it.
 - **macOS: link with `-undefined dynamic_lookup`.** macOS `ld` rejects
-  undefined symbols in a shared library, but `WARN` needs `qsyslog` — an
+  undefined symbols in a shared library, but `WARN` needs `stllog` — an
   engine-provided function pointer resolved at `dlopen` time (Linux allows
   this by default). `-undefined dynamic_lookup` is the Darwin equivalent, set
   as `LDFLAGS-libnd-equip-Darwin` so no other platform is affected.
