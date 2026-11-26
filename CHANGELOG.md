@@ -1,6 +1,8 @@
 ## [Unreleased] (target: v1.0.4)
 
 ### Changed
+- Removed `#ifdef __wasm__` guards around `bud_app_set_state()` in `on_equip_modal_close()` and `nd_equip_on_action()` (`include/nd/equip-ui.h`) to enable native client UI state updates alongside WASM.
+- Stopped event propagation (`bud_event_stop_propagation()`) in `on_equip_modal_close()` (`include/nd/equip-ui.h`).
 - Refactored stllog logging comments, removed add-prefix paths, and cleaned dependencies.
 
 ## [1.0.3]
